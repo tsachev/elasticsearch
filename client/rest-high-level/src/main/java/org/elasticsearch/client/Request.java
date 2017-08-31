@@ -19,6 +19,7 @@
 
 package org.elasticsearch.client;
 
+import org.apache.http.HeaderElement;
 import org.apache.http.HttpEntity;
 import org.apache.http.client.methods.HttpDelete;
 import org.apache.http.client.methods.HttpGet;
@@ -27,6 +28,7 @@ import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.methods.HttpPut;
 import org.apache.http.entity.ByteArrayEntity;
 import org.apache.http.entity.ContentType;
+import org.apache.http.message.BasicHeaderValueParser;
 import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.action.DocWriteRequest;
 import org.elasticsearch.action.bulk.BulkRequest;
@@ -58,6 +60,7 @@ import org.elasticsearch.search.fetch.subphase.FetchSourceContext;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -66,6 +69,14 @@ import java.util.StringJoiner;
 final class Request {
 
     static final XContentType REQUEST_BODY_CONTENT_TYPE = XContentType.JSON;
+    static final Map<XContentType, ContentType> CONTENT_TYPES = new EnumMap<>(XContentType.class);
+    static {
+        for (XContentType xContentType : XContentType.values()) {
+            HeaderElement element = BasicHeaderValueParser.parseElements(xContentType.mediaType(), null)[0];
+            ContentType contentType = ContentType.create(element.getName(), element.getParameters());
+            CONTENT_TYPES.put(xContentType, contentType);
+        }
+    }
 
     final String method;
     final String endpoint;
@@ -140,7 +151,7 @@ final class Request {
         }
 
         byte separator = bulkContentType.xContent().streamSeparator();
-        ContentType requestContentType = ContentType.create(bulkContentType.mediaType());
+        ContentType requestContentType = createContentType(bulkContentType);
 
         ByteArrayOutputStream content = new ByteArrayOutputStream();
         for (DocWriteRequest<?> request : bulkRequest.requests()) {
@@ -268,7 +279,7 @@ final class Request {
         parameters.withWaitForActiveShards(indexRequest.waitForActiveShards());
 
         BytesRef source = indexRequest.source().toBytesRef();
-        ContentType contentType = ContentType.create(indexRequest.getContentType().mediaType());
+        ContentType contentType = createContentType(indexRequest.getContentType());
         HttpEntity entity = new ByteArrayEntity(source.bytes, source.offset, source.length, contentType);
 
         return new Request(method, endpoint, parameters.getParams(), entity);
@@ -352,7 +363,11 @@ final class Request {
 
     private static HttpEntity createEntity(ToXContent toXContent, XContentType xContentType) throws IOException {
         BytesRef source = XContentHelper.toXContent(toXContent, xContentType, false).toBytesRef();
-        return new ByteArrayEntity(source.bytes, source.offset, source.length, ContentType.create(xContentType.mediaType()));
+        return new ByteArrayEntity(source.bytes, source.offset, source.length, createContentType(xContentType));
+    }
+
+    private static ContentType createContentType(XContentType xContentType) {
+        return CONTENT_TYPES.get(xContentType);
     }
 
     static String endpoint(String[] indices, String[] types, String endpoint) {
